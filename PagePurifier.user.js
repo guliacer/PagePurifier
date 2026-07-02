@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.12
+// @version      1.2.13
 // @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
@@ -1121,6 +1121,166 @@
       removeTiebaAdBackdrops();
       unlockTiebaPage();
     }
+
+    restoreTiebaPostReplies(root);
+  }
+
+  function restoreTiebaPostReplies(root) {
+    if (!/^\/p\/\d+(?:[/?#]|$)/.test(currentPath)) return;
+
+    const targets = [];
+    const candidates = selectAll(root, [
+      '#j_p_postlist',
+      '.p_postlist',
+      '.l_post',
+      '.d_post_content',
+      '.d_post_content_main',
+      '.core_reply',
+      '.core_reply_wrapper',
+      '.j_lzl_container',
+      `[${MARK}="hidden"]`,
+      '[style*="display: none"]',
+      '[style*="display:none"]',
+      '[style*="visibility: hidden"]',
+      '[style*="visibility:hidden"]',
+      '[class*="reply"]',
+      '[class*="Reply"]',
+      '[class*="comment"]',
+      '[class*="Comment"]',
+      '[class*="floor"]',
+      '[class*="Floor"]',
+      '[class*="post"]',
+      '[class*="Post"]',
+      '[class*="adapter"]',
+      '[class*="Adapter"]',
+      '[class*="feed"]',
+      '[class*="Feed"]',
+      '[class*="list"]',
+      '[class*="List"]',
+    ]);
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || !element.isConnected) return;
+      collectTiebaPostReplyRestoreTargets(element, targets);
+    });
+
+    uniqueElements(targets).forEach((element) => showTiebaPostReplyElement(element));
+  }
+
+  function collectTiebaPostReplyRestoreTargets(element, targets) {
+    if (!tiebaPostReplyElementLooksLike(element)) return;
+
+    let current = element;
+    let depth = 0;
+    while (current && current !== document.body && depth < 8) {
+      if (!(current instanceof HTMLElement)) break;
+      if (tiebaPostRestoreBoundary(current)) break;
+
+      if (tiebaKnownReplyElement(current) || tiebaElementCurrentlyHidden(current)) {
+        targets.push(current);
+      }
+
+      current = current.parentElement;
+      depth += 1;
+    }
+  }
+
+  function tiebaPostReplyElementLooksLike(element) {
+    if (tiebaKnownReplyElement(element)) return true;
+
+    const text = tiebaElementText(element, 1800);
+    if (!text || tiebaPostChromeTextLooksLike(text)) return false;
+
+    const identity = `${element.id || ''} ${element.className || ''}`;
+    const replyText = /(?:\u5168\u90e8\u56de\u590d|\u53ea\u770b\u697c\u4e3b|\u70ed\u95e8|\u6b63\u5e8f|\u5012\u5e8f|\u7b2c\s*\d+\s*\u697c|\u56de\u590d|\u70b9\u8d5e|\u53d1\u8d34\u4e8e\u767e\u5ea6|\u6587\u660e\u7b2c\u4e00\u6b65)/.test(text);
+    if (!replyText) return false;
+
+    const replyName = /(?:reply|comment|floor|post|thread|feed|list|adapter|pb|core)/i.test(identity);
+    return tiebaElementCurrentlyHidden(element) || replyName || tiebaPostMainRegionLooksLike(element);
+  }
+
+  function tiebaKnownReplyElement(element) {
+    try {
+      return element.matches([
+        '#j_p_postlist',
+        '.p_postlist',
+        '.l_post',
+        '.d_post_content',
+        '.d_post_content_main',
+        '.core_reply',
+        '.core_reply_wrapper',
+        '.j_lzl_container',
+      ].join(','));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function tiebaElementCurrentlyHidden(element) {
+    if (element.getAttribute(MARK) === 'hidden') return true;
+
+    const styleAttr = element.getAttribute('style') || '';
+    if (/display\s*:\s*none|visibility\s*:\s*hidden/i.test(styleAttr)) return true;
+
+    try {
+      const style = getComputedStyle(element);
+      return style.display === 'none' || style.visibility === 'hidden';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function tiebaPostMainRegionLooksLike(element) {
+    const box = element.getBoundingClientRect();
+    if (box.width <= 0 && box.height <= 0) return true;
+    if (box.width < 220 || box.height < 18) return false;
+    if (box.left > window.innerWidth * 0.82) return false;
+    if (box.right < window.innerWidth * 0.28) return false;
+    return box.width <= Math.max(900, window.innerWidth * 0.62);
+  }
+
+  function tiebaPostChromeTextLooksLike(text) {
+    return /(?:\u5927\u5bb6\u90fd\u5728\u901b\u7684\u5427|\u767e\u5ea6\u7248\u6743\u58f0\u660e|\u6298\u53e0\u5bfc\u822a\u680f|\u8fdb\u5427\u770b\u770b|\u6295\u8bc9\u53cd\u9988|400-921-5119)/.test(text);
+  }
+
+  function tiebaPostRestoreBoundary(element) {
+    try {
+      return element.matches('html, body, #app, #root, #__next, header, nav, aside, footer');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function showTiebaPostReplyElement(element) {
+    if (!(element instanceof HTMLElement) || !element.isConnected) return;
+    if (element.getAttribute(MARK) === 'removed') return;
+
+    element.setAttribute(MARK, 'restored');
+    element.style.removeProperty('display');
+    element.style.removeProperty('visibility');
+    element.style.removeProperty('pointer-events');
+
+    if (tiebaElementCurrentlyHidden(element)) {
+      element.style.setProperty('display', tiebaPostReplyDisplayValue(element), 'important');
+      element.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    element.style.setProperty('pointer-events', 'auto', 'important');
+  }
+
+  function tiebaPostReplyDisplayValue(element) {
+    const tag = element.tagName.toLowerCase();
+    if (tag === 'li') return 'list-item';
+    if (tag === 'table') return 'table';
+    if (tag === 'tbody') return 'table-row-group';
+    if (tag === 'tr') return 'table-row';
+    if (tag === 'td' || tag === 'th') return 'table-cell';
+    if (/^(a|span|button|i|em|strong)$/.test(tag)) return 'inline-flex';
+    return 'block';
+  }
+
+  function tiebaElementText(element, limit) {
+    return (element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, limit);
   }
 
   function cleanupTiebaForumChrome(root) {
