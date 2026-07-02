@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         通用去广告助手
-// @namespace    https://github.com/guliacer/universal-ad-cleaner
+// @name         PagePurifier
+// @namespace    https://github.com/guliacer/PagePurifier
 // @version      1.2.10
 // @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐、3DM论坛广告、站酷推荐素材、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
@@ -12,10 +12,10 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
-// @homepageURL  https://github.com/guliacer/universal-ad-cleaner
-// @supportURL   https://github.com/guliacer/universal-ad-cleaner/issues
-// @downloadURL  https://raw.githubusercontent.com/guliacer/universal-ad-cleaner/main/universal-ad-cleaner.user.js
-// @updateURL    https://raw.githubusercontent.com/guliacer/universal-ad-cleaner/main/universal-ad-cleaner.user.js
+// @homepageURL  https://github.com/guliacer/PagePurifier
+// @supportURL   https://github.com/guliacer/PagePurifier/issues
+// @downloadURL  https://raw.githubusercontent.com/guliacer/PagePurifier/main/PagePurifier.user.js
+// @updateURL    https://raw.githubusercontent.com/guliacer/PagePurifier/main/PagePurifier.user.js
 // @license      MIT
 // ==/UserScript==
 

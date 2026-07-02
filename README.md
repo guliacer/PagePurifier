@@ -1,4 +1,4 @@
-# 通用去广告助手
+# PagePurifier
 
 作者：guliacer
 
@@ -8,14 +8,14 @@
 
 1. 安装 Tampermonkey 或暴力猴。
 2. 打开脚本文件：
-   `universal-ad-cleaner.user.js`
+   `PagePurifier.user.js`
 3. 将脚本内容复制到用户脚本管理器中新建脚本并保存。
 4. 刷新网页后生效。
 
 GitHub Raw 安装地址：
 
 ```text
-https://raw.githubusercontent.com/guliacer/universal-ad-cleaner/main/universal-ad-cleaner.user.js
+https://raw.githubusercontent.com/guliacer/PagePurifier/main/PagePurifier.user.js
 ```
 
 ## 主要功能
@@ -56,7 +56,7 @@ https://raw.githubusercontent.com/guliacer/universal-ad-cleaner/main/universal-a
 .
 ├── README.md
 ├── LICENSE
-└── universal-ad-cleaner.user.js
+└── PagePurifier.user.js
 ```
 
 ## 自定义规则
