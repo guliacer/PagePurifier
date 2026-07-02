@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.15
+// @version      1.2.16
 // @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
@@ -261,6 +261,7 @@
     },
     {
       host: /(^|\.)baidu\.com$/,
+      skipTieba: true,
       hide: [
         '.ec-tuiguang',
         '.ec_wise_ad',
@@ -1001,7 +1002,9 @@
   );
 
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const activeRules = siteRules.filter((rule) => rule.host.test(hostname) && (!rule.path || rule.path.test(currentPath)));
+  const activeRules = siteRules.filter((rule) => rule.host.test(hostname)
+    && (!rule.path || rule.path.test(currentPath))
+    && !(isTiebaHost && rule.skipTieba));
   const hideSelectors = unique(baseHideSelectors.concat(activeRules.flatMap((rule) => rule.hide || [])));
   const removeSelectors = unique(baseRemoveSelectors.concat(activeRules.flatMap((rule) => rule.remove || [])));
   const extraCss = activeRules.map((rule) => rule.css || '').filter(Boolean).join('\n');
@@ -1170,13 +1173,27 @@
     const targets = [];
     const candidates = selectAll(root, [
       '#j_p_postlist',
+      '#pb_content',
       '.p_postlist',
+      '.pb_content',
       '.l_post',
       '.d_post_content',
       '.d_post_content_main',
       '.core_reply',
       '.core_reply_wrapper',
       '.j_lzl_container',
+      '[class*="reply-list"]',
+      '[class*="replyList"]',
+      '[class*="ReplyList"]',
+      '[class*="comment-list"]',
+      '[class*="commentList"]',
+      '[class*="CommentList"]',
+      '[class*="post-list"]',
+      '[class*="postList"]',
+      '[class*="PostList"]',
+      '[class*="feed-list"]',
+      '[class*="feedList"]',
+      '[class*="FeedList"]',
       `[${MARK}="hidden"]`,
       '[style*="display: none"]',
       '[style*="display:none"]',
@@ -1227,29 +1244,54 @@
   function tiebaPostReplyElementLooksLike(element) {
     if (tiebaKnownReplyElement(element)) return true;
 
-    const text = tiebaElementText(element, 1800);
-    if (!text || tiebaPostChromeTextLooksLike(text)) return false;
+    const identity = `${element.id || ''} ${element.className || ''} ${element.getAttribute('data-testid') || ''} ${element.getAttribute('data-module') || ''}`;
+    if (tiebaPostChromeIdentityLooksLike(identity)) return false;
 
-    const identity = `${element.id || ''} ${element.className || ''}`;
+    const text = tiebaElementText(element, 1800);
+    if (!text) {
+      return tiebaPostReplyIdentityLooksLike(identity) && tiebaPostMainRegionLooksLike(element);
+    }
+
+    if (tiebaPostChromeTextLooksLike(text)) return false;
+
     const replyText = /(?:\u5168\u90e8\u56de\u590d|\u53ea\u770b\u697c\u4e3b|\u70ed\u95e8|\u6b63\u5e8f|\u5012\u5e8f|\u7b2c\s*\d+\s*\u697c|\u56de\u590d|\u70b9\u8d5e|\u53d1\u8d34\u4e8e\u767e\u5ea6|\u6587\u660e\u7b2c\u4e00\u6b65)/.test(text);
     if (!replyText) return false;
 
-    const replyName = /(?:reply|comment|floor|post|thread|feed|list|adapter|pb|core)/i.test(identity);
+    const replyName = tiebaPostReplyIdentityLooksLike(identity);
     return tiebaElementCurrentlyHidden(element) || replyName || tiebaPostMainRegionLooksLike(element);
   }
 
   function tiebaKnownReplyElement(element) {
     try {
-      return element.matches([
+      if (element.matches([
         '#j_p_postlist',
+        '#pb_content',
         '.p_postlist',
+        '.pb_content',
         '.l_post',
         '.d_post_content',
         '.d_post_content_main',
         '.core_reply',
         '.core_reply_wrapper',
         '.j_lzl_container',
-      ].join(','));
+      ].join(','))) {
+        return true;
+      }
+
+      return element.matches([
+        '[class*="reply-list"]',
+        '[class*="replyList"]',
+        '[class*="ReplyList"]',
+        '[class*="comment-list"]',
+        '[class*="commentList"]',
+        '[class*="CommentList"]',
+        '[class*="post-list"]',
+        '[class*="postList"]',
+        '[class*="PostList"]',
+        '[class*="feed-list"]',
+        '[class*="feedList"]',
+        '[class*="FeedList"]',
+      ].join(',')) && tiebaPostMainRegionLooksLike(element);
     } catch (_) {
       return false;
     }
@@ -1280,6 +1322,15 @@
 
   function tiebaPostChromeTextLooksLike(text) {
     return /(?:\u5927\u5bb6\u90fd\u5728\u901b\u7684\u5427|\u767e\u5ea6\u7248\u6743\u58f0\u660e|\u6298\u53e0\u5bfc\u822a\u680f|\u8fdb\u5427\u770b\u770b|\u6295\u8bc9\u53cd\u9988|400-921-5119)/.test(text);
+  }
+
+  function tiebaPostReplyIdentityLooksLike(identity) {
+    return /(?:reply|comment|floor|post|thread|feed|list|adapter|virtual|scroll|pb|core|frs|lzl)/i.test(identity)
+      && !tiebaPostChromeIdentityLooksLike(identity);
+  }
+
+  function tiebaPostChromeIdentityLooksLike(identity) {
+    return /(?:aside|side|right|copyright|footer|navbar|navigation|fold|recommend|hot-topic|topic-card|forum-card|profile|user-card)/i.test(identity);
   }
 
   function tiebaPostRestoreBoundary(element) {
