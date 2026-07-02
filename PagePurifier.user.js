@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.14
+// @version      1.2.15
 // @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
@@ -37,6 +37,9 @@
   const isOpenArtHost = /(^|\.)openart\.ai$/.test(hostname);
   const isXiaohongshuHost = /(^|\.)xiaohongshu\.com$/.test(hostname);
   const isLiblibHost = /(^|\.)liblib\.art$/.test(hostname);
+  const isTaobaoFamilyHost = /(^|\.)taobao\.com$|(^|\.)tmall\.com$|(^|\.)tmall\.hk$/.test(hostname);
+  const isJdFamilyHost = /(^|\.)jd\.com$|(^|\.)jd\.hk$|(^|\.)jingdong\.com$|(^|\.)360buy\.com$|(^|\.)3\.cn$/.test(hostname);
+  const isShoppingFamilyHost = isTaobaoFamilyHost || isJdFamilyHost;
   let xiaohongshuManualLoginUntil = 0;
   let xiaohongshuReplyExpandUntil = 0;
   let xiaohongshuLoginGateInstalled = false;
@@ -1033,6 +1036,7 @@
     cleanupThreeDmForum(root);
     cleanupBaiduFamily(root);
     cleanupBaiduMap(root);
+    cleanupShoppingFamily(root);
     cleanupBilibiliFamily(root);
     cleanupZcoolFamily(root);
     cleanupD3x7Family(root);
@@ -2110,6 +2114,369 @@
     }
 
     removeElement(mask);
+  }
+
+  function cleanupShoppingFamily(root) {
+    cleanupTaobaoCouponPopup(root);
+    cleanupShoppingPromotionLinks(root);
+    cleanupShoppingCurrentUrl();
+  }
+
+  function cleanupTaobaoCouponPopup(root) {
+    if (!isTaobaoFamilyHost) return;
+
+    const candidates = selectAll(root, [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[class*="coupon"]',
+      '[class*="Coupon"]',
+      '[class*="hongbao"]',
+      '[class*="redPacket"]',
+      '[class*="RedPacket"]',
+      '[class*="popup"]',
+      '[class*="Popup"]',
+      '[class*="modal"]',
+      '[class*="Modal"]',
+      '[class*="dialog"]',
+      '[class*="Dialog"]',
+      '[class*="mask"]',
+      '[class*="Mask"]',
+      '[class*="overlay"]',
+      '[class*="Overlay"]',
+      '[style*="position: fixed"]',
+      '[style*="position:fixed"]',
+      '[style*="position: absolute"]',
+      '[style*="position:absolute"]',
+      'body > div',
+      'section',
+      'div',
+      'button',
+      'span',
+    ]);
+
+    let removedPopup = false;
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
+
+      const popup = taobaoCouponPopupContainer(element);
+      if (popup) {
+        removeElement(popup);
+        removedPopup = true;
+      }
+    });
+
+    if (removedPopup) cleanupTaobaoCouponArtifacts(true);
+  }
+
+  function taobaoCouponPopupContainer(element) {
+    if (!taobaoCouponPopupTextLooksLike(compactText(element))) return null;
+
+    let current = element;
+    let best = null;
+    let depth = 0;
+    while (current && current !== document.body && depth < 8) {
+      if (!(current instanceof HTMLElement)) break;
+      if (taobaoPageRoot(current)) break;
+
+      const text = compactText(current);
+      if (taobaoCouponPopupTextLooksLike(text)) {
+        if (taobaoCouponBackdropLooksLike(current, true)) return current;
+        if (taobaoCouponBoxLooksRemovable(current)) best = current;
+      }
+
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return best;
+  }
+
+  function taobaoCouponPopupTextLooksLike(text) {
+    const titleSignal = /百亿补贴红包|红包|补贴红包/.test(text);
+    const actionSignal = /开心收下|立即领取|领取红包|收下红包/.test(text);
+    const couponSignal = /满\s*\d+\s*可用|有效期至|[¥￥]\s*\d+/.test(text);
+    return (titleSignal && couponSignal) || (actionSignal && couponSignal) || (titleSignal && actionSignal);
+  }
+
+  function taobaoCouponBoxLooksRemovable(element) {
+    const box = element.getBoundingClientRect();
+    if (box.width < 160 || box.height < 150) return false;
+    if (box.width > Math.min(680, window.innerWidth * 0.72) || box.height > window.innerHeight * 0.86) return false;
+
+    const centerX = box.left + box.width / 2;
+    const centerY = box.top + box.height / 2;
+    const nearCenterX = Math.abs(centerX - window.innerWidth / 2) < window.innerWidth * 0.26;
+    const nearCenterY = Math.abs(centerY - window.innerHeight / 2) < window.innerHeight * 0.34;
+    if (!nearCenterX || !nearCenterY) return false;
+
+    const identity = `${element.id || ''} ${element.className || ''}`;
+    const namedPopup = /(coupon|hongbao|red.?packet|popup|modal|dialog|mask|overlay|rax)/i.test(identity);
+    const style = getComputedStyle(element);
+    const floating = /^(fixed|absolute|sticky)$/.test(style.position) || parseZIndex(style.zIndex) >= 5;
+
+    return namedPopup || floating || /百亿补贴红包|开心收下/.test(compactText(element));
+  }
+
+  function cleanupTaobaoCouponArtifacts(force) {
+    let removedArtifact = false;
+
+    selectAll(document, [
+      '[class*="mask"]',
+      '[class*="Mask"]',
+      '[class*="overlay"]',
+      '[class*="Overlay"]',
+      '[class*="modal"]',
+      '[class*="Modal"]',
+      '[class*="popup"]',
+      '[class*="Popup"]',
+      '[style*="position: fixed"]',
+      '[style*="position:fixed"]',
+      'body > div',
+    ]).forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
+
+      if (force && taobaoCouponBackdropLooksLike(element, false)) {
+        removeElement(element);
+        removedArtifact = true;
+      }
+    });
+
+    if (force || removedArtifact) unlockTaobaoPage();
+  }
+
+  function taobaoCouponBackdropLooksLike(element, allowTextSignal) {
+    if (taobaoPageRoot(element)) return false;
+
+    const box = element.getBoundingClientRect();
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = box.width * box.height;
+    if (area < viewportArea * 0.42) return false;
+
+    const style = getComputedStyle(element);
+    const identity = `${element.id || ''} ${element.className || ''}`;
+    const floating = /^(fixed|absolute|sticky)$/.test(style.position) || parseZIndex(style.zIndex) >= 10;
+    const namedMask = /(mask|overlay|modal|dialog|popup|coupon|hongbao|red.?packet)/i.test(identity);
+    const darkBackground = /rgba?\(\s*(?:0|[1-9]\d?)\s*,\s*(?:0|[1-9]\d?)\s*,\s*(?:0|[1-9]\d?)(?:\s*,\s*(?:0\.[2-9]|1(?:\.0)?))?\s*\)/i.test(style.backgroundColor);
+    const textSignal = allowTextSignal && taobaoCouponPopupTextLooksLike(compactText(element));
+
+    return floating && (namedMask || darkBackground || textSignal);
+  }
+
+  function unlockTaobaoPage() {
+    [document.documentElement, document.body].forEach((element) => {
+      if (!element) return;
+      element.style.removeProperty('overflow');
+      element.style.removeProperty('position');
+      element.style.removeProperty('padding-right');
+      element.classList.remove('modal-open', 'overflow-hidden', 'no-scroll', 'lock-scroll');
+    });
+  }
+
+  function taobaoPageRoot(element) {
+    try {
+      return element.matches('html, body, #app, #root, #ice-container, main');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function cleanupShoppingCurrentUrl() {
+    if (!isShoppingFamilyHost) return;
+
+    const cleaned = cleanShoppingUrl(location.href, 0);
+    if (!cleaned || cleaned === location.href) return;
+
+    try {
+      history.replaceState(history.state, document.title, cleaned);
+    } catch (_) {
+      // History can be locked down in a few embedded shopping frames.
+    }
+  }
+
+  function cleanupShoppingPromotionLinks(root) {
+    const selectors = [
+      'a[href*="taobao.com"]',
+      'a[href*="tmall.com"]',
+      'a[href*="tmall.hk"]',
+      'a[href*="jd.com"]',
+      'a[href*="jingdong.com"]',
+      'a[href*="360buy.com"]',
+      'a[href*="3.cn"]',
+    ];
+
+    if (!isShoppingFamilyHost) {
+      try {
+        const selector = selectors.join(',');
+        const rootMatches = root.nodeType === Node.ELEMENT_NODE && root.matches(selector);
+        if (!rootMatches && !root.querySelector(selector)) return;
+      } catch (_) {
+        return;
+      }
+    }
+
+    selectAll(root, selectors).forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement) || link.hasAttribute(MARK)) return;
+
+      const original = link.getAttribute('href') || '';
+      const cleaned = cleanShoppingUrl(original, 0);
+      if (cleaned && cleaned !== original) link.setAttribute('href', cleaned);
+    });
+  }
+
+  function cleanShoppingUrl(rawUrl, depth) {
+    if (!rawUrl || depth > 2) return '';
+    if (/^(?:javascript|mailto|tel|data):|^#/i.test(rawUrl.trim())) return '';
+
+    let url;
+    try {
+      url = new URL(rawUrl, location.href);
+    } catch (_) {
+      return '';
+    }
+
+    if (!/^https?:$/i.test(url.protocol)) return '';
+
+    const nested = nestedShoppingUrl(url);
+    if (nested) return cleanShoppingUrl(nested, depth + 1);
+
+    const normalizedHost = normalizedShoppingHost(url.hostname);
+    if (isTaobaoUrlHost(normalizedHost)) return cleanTaobaoUrl(url, normalizedHost);
+    if (isJdUrlHost(normalizedHost)) return cleanJdUrl(url, normalizedHost);
+
+    return '';
+  }
+
+  function nestedShoppingUrl(url) {
+    const nestedParams = [
+      'url',
+      'to',
+      'target',
+      'redirect',
+      'redirect_url',
+      'redirectUrl',
+      'returnUrl',
+      'returnurl',
+      'u',
+      'tu',
+      'r',
+      'link',
+      'adurl',
+      'murl',
+      'tourl',
+    ];
+
+    for (const name of nestedParams) {
+      const value = url.searchParams.get(name);
+      if (!value) continue;
+
+      const decoded = decodeShoppingUrlComponent(value);
+      if (!/^https?:\/\//i.test(decoded) && !/^\/\//.test(decoded)) continue;
+
+      let nested;
+      try {
+        nested = new URL(decoded, location.href);
+      } catch (_) {
+        continue;
+      }
+
+      const host = normalizedShoppingHost(nested.hostname);
+      if (isTaobaoUrlHost(host) || isJdUrlHost(host)) return nested.href;
+    }
+
+    return '';
+  }
+
+  function cleanTaobaoUrl(url, normalizedHost) {
+    const itemId = shoppingFirstParam(url, ['id', 'item_id', 'itemId', 'itemid']);
+    const path = url.pathname;
+    const itemLike = /(?:^|\/)(?:item|detail)(?:\.htm|\.html)?$/i.test(path)
+      || /\/awp\/core\/detail\.htm$/i.test(path)
+      || /\/item\//i.test(path)
+      || /pcdetail\.taobao\.com$/i.test(normalizedHost)
+      || /detail\.tmall\.(?:com|hk)$/i.test(normalizedHost);
+
+    if (itemLike && itemId) {
+      if (/tmall/i.test(normalizedHost)) return `https://detail.tmall.com/item.htm?id=${encodeURIComponent(itemId)}`;
+      return `https://item.taobao.com/item.htm?id=${encodeURIComponent(itemId)}`;
+    }
+
+    return stripShoppingTrackingParams(url);
+  }
+
+  function cleanJdUrl(url, normalizedHost) {
+    const pathSku = url.pathname.match(/(?:\/product)?\/(\d+)(?:\.html?)?$/i);
+    const querySku = shoppingFirstParam(url, ['sku', 'skuId', 'wareId', 'productId', 'itemId']);
+    const sku = pathSku ? pathSku[1] : querySku;
+
+    if (sku && /(^|\.)item\.jd\.com$|(^|\.)item\.jd\.hk$|^item\.m\.jd\.com$|^m\.jd\.com$/i.test(normalizedHost)) {
+      const host = /jd\.hk$/i.test(normalizedHost) ? 'item.jd.hk' : 'item.jd.com';
+      return `https://${host}/${encodeURIComponent(sku)}.html`;
+    }
+
+    if (sku && /\/product\//i.test(url.pathname)) return `https://item.jd.com/${encodeURIComponent(sku)}.html`;
+
+    return stripShoppingTrackingParams(url);
+  }
+
+  function stripShoppingTrackingParams(url) {
+    const cleaned = new URL(url.href);
+    let changed = false;
+
+    Array.from(cleaned.searchParams.keys()).forEach((name) => {
+      if (shoppingTrackingParamLooksLike(name)) {
+        cleaned.searchParams.delete(name);
+        changed = true;
+      }
+    });
+
+    if (shoppingTrackingHashLooksLike(cleaned.hash)) {
+      cleaned.hash = '';
+      changed = true;
+    }
+
+    return changed ? cleaned.href : '';
+  }
+
+  function shoppingTrackingParamLooksLike(name) {
+    return /^(?:spm|scm|pvid|utparam|xxc|mi_id|bc_fl_src|custom_content_source|ali_trackid|union_lens|abbucket|tpp_buckets|abtest|aplus_abtest|rn|ns|sid|traceid|trace_id|clickid|click_id|clk1|ad_id|am_id|cm_id|pm_id|source|sourceType|from|from_source|fromSource|fromURL|scene|activity_id|campaign_id|utm_.+|ptag|cu|abt|ad_od|jd_pop|extension_id|gx|gxd|pps|log|e|rid|callback|cu_source)$/i.test(name);
+  }
+
+  function shoppingTrackingHashLooksLike(hash) {
+    return /(?:spm|scm|pvid|utparam|utm_|clickid|traceid|campaign|ad_)/i.test(hash || '');
+  }
+
+  function shoppingFirstParam(url, names) {
+    for (const name of names) {
+      const value = url.searchParams.get(name);
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function decodeShoppingUrlComponent(value) {
+    let decoded = value;
+    for (let index = 0; index < 2; index += 1) {
+      try {
+        const next = decodeURIComponent(decoded);
+        if (next === decoded) break;
+        decoded = next;
+      } catch (_) {
+        break;
+      }
+    }
+    return decoded;
+  }
+
+  function normalizedShoppingHost(host) {
+    return String(host || '').replace(/^www\./i, '').toLowerCase();
+  }
+
+  function isTaobaoUrlHost(host) {
+    return /(^|\.)taobao\.com$|(^|\.)tmall\.com$|(^|\.)tmall\.hk$/.test(host);
+  }
+
+  function isJdUrlHost(host) {
+    return /(^|\.)jd\.com$|(^|\.)jd\.hk$|(^|\.)jingdong\.com$|(^|\.)360buy\.com$|(^|\.)3\.cn$/.test(host);
   }
 
   function cleanupZcoolFamily(root) {
