@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.10
-// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐、3DM论坛广告、站酷推荐素材、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
+// @version      1.2.11
+// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
 // @match        https://*/*
@@ -1693,8 +1693,13 @@
   }
 
   function cleanupZcoolFamily(root) {
-    if (!isZcoolHost || !/^\/work\//.test(location.pathname)) return;
+    if (!isZcoolHost) return;
 
+    if (/^\/work\//.test(location.pathname)) cleanupZcoolWorkPage(root);
+    if (/^\/discover(?:[/?#]|$)/.test(location.pathname)) cleanupZcoolDiscoverPage(root);
+  }
+
+  function cleanupZcoolWorkPage(root) {
     const candidates = selectAll(root, [
       '.likeRecommendList',
       '.recommend-covers',
@@ -1712,6 +1717,35 @@
       if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
 
       const container = zcoolRecommendedAssetsContainer(element);
+      if (container) removeElement(container);
+    });
+  }
+
+  function cleanupZcoolDiscoverPage(root) {
+    const candidates = selectAll(root, [
+      '[class*="hellorf"]',
+      '[class*="Hellorf"]',
+      '[class*="asset"]',
+      '[class*="Asset"]',
+      '[class*="copyright"]',
+      '[class*="Copyright"]',
+      '[class*="recommend"]',
+      '[class*="Recommend"]',
+      'a[href*="/assets/"]',
+      'a[href*="hellorf"]',
+      'img[src*="hellorf"]',
+      'section',
+      'div',
+      'h2',
+      'h3',
+      'p',
+      'span',
+    ]);
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
+
+      const container = zcoolDiscoverLicensedImagesContainer(element);
       if (container) removeElement(container);
     });
   }
@@ -1765,6 +1799,66 @@
     try {
       if (element.matches('a[href*="/assets/"][href*="project=info_bottom"]')) return true;
       return Boolean(element.querySelector('a[href*="/assets/"][href*="project=info_bottom"], a.img-card[href*="/assets/"]'));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function zcoolDiscoverLicensedImagesContainer(element) {
+    if (!zcoolDiscoverLicensedImagesSignal(element)) return null;
+
+    let current = element;
+    let candidate = null;
+    let depth = 0;
+
+    while (current && current !== document.body && depth < 8) {
+      if (!(current instanceof HTMLElement)) break;
+      if (zcoolDiscoverPageRoot(current)) break;
+
+      if (zcoolDiscoverLicensedImagesSignal(current) && zcoolDiscoverLicensedImagesBoxLooksRemovable(current)) {
+        candidate = current;
+      }
+
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return candidate;
+  }
+
+  function zcoolDiscoverLicensedImagesSignal(element) {
+    if (!(element instanceof HTMLElement)) return false;
+
+    const text = compactText(element);
+    if (!/与内容相关的正版图片/.test(text)) return false;
+
+    return zcoolDiscoverLicensedImagesLink(element) || text.length <= 120 || zcoolDiscoverLicensedImagesBoxLooksRemovable(element);
+  }
+
+  function zcoolDiscoverLicensedImagesLink(element) {
+    try {
+      if (element.matches('a[href*="/assets/"], a[href*="hellorf"], img[src*="hellorf"]')) return true;
+      return Boolean(element.querySelector('a[href*="/assets/"], a[href*="hellorf"], img[src*="hellorf"]'));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function zcoolDiscoverLicensedImagesBoxLooksRemovable(element) {
+    const box = element.getBoundingClientRect();
+    if (box.width < Math.min(520, window.innerWidth * 0.4) || box.height < 80) return false;
+    if (box.height > Math.max(420, window.innerHeight * 0.65)) return false;
+
+    const text = compactText(element);
+    if (!/与内容相关的正版图片/.test(text)) return false;
+
+    const wideHorizontalBlock = box.width > window.innerWidth * 0.55 && box.height < Math.max(360, window.innerHeight * 0.45);
+    return wideHorizontalBlock || zcoolDiscoverLicensedImagesLink(element);
+  }
+
+  function zcoolDiscoverPageRoot(element) {
+    try {
+      return element.matches('html, body, #app, #root, #__next, main, footer, header, nav');
     } catch (_) {
       return false;
     }

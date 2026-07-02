@@ -36,7 +36,7 @@ https://raw.githubusercontent.com/guliacer/PagePurifier/main/PagePurifier.user.j
 - B 站：推广卡片和疑似置顶商单评论。
 - CSDN：正文展开遮挡、广告盒和部分遮罩。
 - 3DM 论坛：帖子页顶部/楼层通栏、居中弹窗、游戏 iframe 和右下角浮动广告。
-- 站酷：作品页“推荐素材”区块。
+- 站酷：作品页“推荐素材”区块，发现页“与内容相关的正版图片”横向推荐区。
 - D3X7：居中售后/网盘下载提示弹窗和暗色遮罩。
 - 夸克网盘：分享页右侧推广卡、下载助手浮条和客户端引导提示。
 - OpenArt：首页 What's New/订阅优惠弹窗和顶部限时优惠条。
