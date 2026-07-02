@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.11
-// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
+// @version      1.2.12
+// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
 // @match        https://*/*
@@ -1087,6 +1087,7 @@
   function cleanupTiebaFamily(root) {
     if (!isTiebaHost) return;
 
+    cleanupTiebaForumChrome(root);
     cleanupTiebaSearchRecommendations(root);
 
     const candidates = selectAll(root, [
@@ -1120,6 +1121,141 @@
       removeTiebaAdBackdrops();
       unlockTiebaPage();
     }
+  }
+
+  function cleanupTiebaForumChrome(root) {
+    if (!/^\/f(?:[?#]|$)/.test(currentPath)) return;
+
+    const candidates = selectAll(root, [
+      '[aria-label*="折叠导航栏"]',
+      '[title*="折叠导航栏"]',
+      '[class*="left"]',
+      '[class*="Left"]',
+      '[class*="side"]',
+      '[class*="Side"]',
+      '[class*="nav"]',
+      '[class*="Nav"]',
+      '[class*="copyright"]',
+      '[class*="Copyright"]',
+      '[class*="footer"]',
+      '[class*="Footer"]',
+      'aside',
+      'nav',
+      'footer',
+      'section',
+      'button',
+      '[role="button"]',
+      'div',
+      'span',
+      'p',
+    ]);
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
+
+      const chrome = tiebaForumChromeContainer(element);
+      if (chrome) removeElement(chrome);
+    });
+  }
+
+  function tiebaForumChromeContainer(element) {
+    if (tiebaLeftNavigationLooksLike(element) || tiebaBaiduCopyrightLooksLike(element)) return element;
+
+    const attrs = [
+      element.getAttribute('aria-label'),
+      element.getAttribute('title'),
+      element.getAttribute('data-title'),
+    ].filter(Boolean).join(' ');
+
+    if (/折叠导航栏/.test(attrs)) {
+      const control = closestTiebaLeftNavigation(element);
+      return control;
+    }
+
+    const text = compactText(element);
+    if (/百度版权声明|©\s*\d{4}\s*Baidu|使用百度前必读|贴吧协议|隐私政策|投诉反馈/.test(text)) {
+      return closestTiebaCopyright(element);
+    }
+
+    if (/大家都在逛的吧/.test(text)) {
+      return closestTiebaLeftNavigation(element);
+    }
+
+    return null;
+  }
+
+  function closestTiebaLeftNavigation(element) {
+    let current = element;
+    let best = null;
+    let depth = 0;
+
+    while (current && current !== document.body && depth < 7) {
+      if (!(current instanceof HTMLElement)) break;
+
+      if (tiebaLeftNavigationLooksLike(current)) best = current;
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return best;
+  }
+
+  function tiebaLeftNavigationLooksLike(element) {
+    const text = compactText(element);
+    const attrs = [
+      element.getAttribute('aria-label'),
+      element.getAttribute('title'),
+      element.getAttribute('data-title'),
+      element.id,
+      element.className,
+    ].filter(Boolean).join(' ');
+    const label = `${text} ${attrs}`;
+
+    if (!/折叠导航栏|大家都在逛的吧/.test(label)) return false;
+
+    const box = element.getBoundingClientRect();
+    if (box.width < 16 || box.height < 16) return false;
+    if (box.left > window.innerWidth * 0.38) return false;
+
+    const sidebarBlock = box.width >= 120
+      && box.width <= 380
+      && box.height >= Math.min(220, window.innerHeight * 0.22)
+      && box.right <= window.innerWidth * 0.42;
+    const collapseControl = /折叠导航栏/.test(label)
+      && box.width <= 140
+      && box.height <= 80
+      && box.top <= Math.max(180, window.innerHeight * 0.22);
+
+    return sidebarBlock || collapseControl;
+  }
+
+  function closestTiebaCopyright(element) {
+    let current = element;
+    let best = null;
+    let depth = 0;
+
+    while (current && current !== document.body && depth < 6) {
+      if (!(current instanceof HTMLElement)) break;
+
+      if (tiebaBaiduCopyrightLooksLike(current)) best = current;
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return best;
+  }
+
+  function tiebaBaiduCopyrightLooksLike(element) {
+    const text = compactText(element);
+    if (!/百度版权声明|©\s*\d{4}\s*Baidu|使用百度前必读|贴吧协议|隐私政策|投诉反馈|举报电话\s*:\s*400-921-5119/i.test(text)) return false;
+
+    const box = element.getBoundingClientRect();
+    if (box.width < 120 || box.height < 18) return false;
+    if (box.width > 560 || box.height > 180) return false;
+    if (box.left < window.innerWidth * 0.48) return false;
+    if (box.top < window.innerHeight * 0.45) return false;
+
+    return text.length <= 420;
   }
 
   function cleanupTiebaSearchRecommendations(root) {
