@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.13
+// @version      1.2.14
 // @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
@@ -221,6 +221,41 @@
   ];
 
   const siteRules = [
+    {
+      host: /^baidu\.com$/,
+      path: /^\/(?:[?#]|$)/,
+      hide: [
+        '#s-hotsearch-wrapper',
+        '.s-hotsearch-wrapper',
+        '#chat-input-extension',
+        '#chat-input-extension [class*="guide-bub"]',
+        '#chat-input-extension [class*="panel-sample"]',
+        '#chat-input-extension a[href*="chat.baidu.com/search"][href*="home_operate"]',
+        'a[class*="guide-bub"][href*="chat.baidu.com/search"]',
+      ],
+      remove: [
+        '#s-hotsearch-wrapper',
+        '.s-hotsearch-wrapper',
+        '#chat-input-extension',
+        '#chat-input-extension [class*="guide-bub"]',
+        '#chat-input-extension [class*="panel-sample"]',
+        '#chat-input-extension a[href*="chat.baidu.com/search"][href*="home_operate"]',
+        'a[class*="guide-bub"][href*="chat.baidu.com/search"]',
+      ],
+      css: `
+        #s-hotsearch-wrapper,
+        .s-hotsearch-wrapper,
+        #chat-input-extension,
+        #chat-input-extension [class*="guide-bub"],
+        #chat-input-extension [class*="panel-sample"],
+        #chat-input-extension a[href*="chat.baidu.com/search"][href*="home_operate"],
+        a[class*="guide-bub"][href*="chat.baidu.com/search"] {
+          display: none !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+      `,
+    },
     {
       host: /(^|\.)baidu\.com$/,
       hide: [
@@ -1666,6 +1701,8 @@
   function cleanupBaiduFamily(root) {
     if (!isBaiduHost) return;
 
+    cleanupBaiduHomepage(root);
+
     const candidates = selectAll(root, [
       '#content_left > div',
       '#content_left > table',
@@ -1691,6 +1728,93 @@
       cleanupBaiduRedirect(element);
       if (baiduCardLooksSponsored(element)) hideElement(element);
     });
+  }
+
+  function cleanupBaiduHomepage(root) {
+    if (!/^\/(?:[?#]|$)/.test(currentPath)) return;
+
+    const candidates = selectAll(root, [
+      '#s-hotsearch-wrapper',
+      '.s-hotsearch-wrapper',
+      '#chat-input-extension',
+      '#chat-input-extension [class*="guide-bub"]',
+      '#chat-input-extension [class*="panel-sample"]',
+      '#chat-input-extension a[href*="chat.baidu.com/search"]',
+      'a[href*="chat.baidu.com/search"][href*="home_operate"]',
+      'a[href*="top.baidu.com/board"]',
+      '[class*="hotsearch"]',
+      '[class*="HotSearch"]',
+      '[class*="guide-bub"]',
+      '[class*="GuideBub"]',
+      'section',
+      'div',
+      'a',
+    ]);
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element.hasAttribute(MARK) || !element.isConnected) return;
+
+      const target = baiduHomepageRemovalTarget(element);
+      if (target) removeElement(target);
+    });
+  }
+
+  function baiduHomepageRemovalTarget(element) {
+    return baiduHomepageAiBubbleContainer(element) || baiduHomepageHotSearchContainer(element);
+  }
+
+  function baiduHomepageAiBubbleContainer(element) {
+    if (!baiduHomepageAiBubbleSignal(element)) return null;
+
+    const stable = element.closest('#chat-input-extension, [class*="guide-bub"], [class*="panel-sample"]');
+    if (stable instanceof HTMLElement && baiduHomepageAiBubbleSignal(stable)) {
+      return stable.id === 'chat-input-extension' ? stable : stable.closest('#chat-input-extension') || stable;
+    }
+
+    return element instanceof HTMLElement ? element : null;
+  }
+
+  function baiduHomepageAiBubbleSignal(element) {
+    const text = compactText(element);
+    const href = element.getAttribute('href') || '';
+    const identity = `${element.id || ''} ${element.className || ''}`;
+
+    const textSignal = /复杂问题就找文心助手|深入思考回答更优|复杂问题文心助手回答更优/.test(text);
+    const linkSignal = /chat\.baidu\.com\/search/i.test(href) && /home_operate|ai_search|isShowHello=1/i.test(href);
+    const nameSignal = /guide-bub|panel-sample/i.test(identity);
+
+    return (textSignal && (linkSignal || nameSignal)) || (linkSignal && nameSignal);
+  }
+
+  function baiduHomepageHotSearchContainer(element) {
+    const stable = element.closest('#s-hotsearch-wrapper, .s-hotsearch-wrapper');
+    if (stable instanceof HTMLElement) return stable;
+
+    const text = compactText(element);
+    if (!/百度热搜/.test(text) || !/换一换/.test(text)) return null;
+
+    let current = element;
+    let best = null;
+    let depth = 0;
+    while (current && current !== document.body && depth < 7) {
+      if (!(current instanceof HTMLElement)) break;
+      if (/head_wrapper|wrapper|s_form|s_form_wrapper/.test(`${current.id || ''} ${current.className || ''}`)) break;
+
+      const box = current.getBoundingClientRect();
+      const identity = `${current.id || ''} ${current.className || ''}`;
+      const namedHotSearch = /hotsearch|hot-search|top-list|realtime/i.test(identity);
+      const blockSized = box.width >= 320
+        && box.width <= Math.max(980, window.innerWidth * 0.7)
+        && box.height >= 80
+        && box.height <= Math.max(420, window.innerHeight * 0.55);
+
+      if (namedHotSearch || blockSized) best = current;
+
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return best;
   }
 
   function baiduCardLooksSponsored(element) {
