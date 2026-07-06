@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PagePurifier
 // @namespace    https://github.com/guliacer/PagePurifier
-// @version      1.2.16
-// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
+// @version      1.3.0
+// @description  保守清理常见网页广告、百度搜索右栏与推广跳转、百度地图下载/领券浮层、贴吧弹窗/搜索推荐/侧栏版权、3DM论坛广告、站酷推荐素材/正版图片推荐、D3X7居中提示、夸克网盘推广提示、OpenArt营销弹窗、小红书自动登录弹窗/回复展开、LibLibAI登录领积分/离站弹窗、淘宝首页精简/搜索页广告侧栏、B站推广卡片与UP快捷拉黑、视频站广告层、正文遮挡、悬浮广告、广告 iframe 和动态插入广告，支持全局/站点开关。
 // @author       guliacer
 // @match        http://*/*
 // @match        https://*/*
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      api.bilibili.com
 // @homepageURL  https://github.com/guliacer/PagePurifier
 // @supportURL   https://github.com/guliacer/PagePurifier/issues
 // @downloadURL  https://raw.githubusercontent.com/guliacer/PagePurifier/main/PagePurifier.user.js
@@ -24,6 +26,7 @@
 
   const GLOBAL_ENABLED_KEY = 'adCleaner.globalEnabled';
   const DISABLED_HOSTS_KEY = 'adCleaner.disabledHosts';
+  const BILIBILI_UP_BLOCK_ENABLED_KEY = 'adCleaner.bilibiliUpBlockEnabled';
   const MARK = 'data-tm-ad-cleaner';
   const hostname = location.hostname.replace(/^www\./, '');
   const isBaiduHost = /(^|\.)baidu\.com$/.test(hostname);
@@ -43,6 +46,7 @@
   let xiaohongshuManualLoginUntil = 0;
   let xiaohongshuReplyExpandUntil = 0;
   let xiaohongshuLoginGateInstalled = false;
+  let bilibiliUpBlockerInstalled = false;
 
   const storage = {
     get(key, defaultValue) {
@@ -80,6 +84,7 @@
   const globallyEnabled = storage.get(GLOBAL_ENABLED_KEY, true);
   const disabledHosts = storage.get(DISABLED_HOSTS_KEY, []);
   const disabledHere = disabledHosts.includes(hostname);
+  const bilibiliUpBlockEnabled = storage.get(BILIBILI_UP_BLOCK_ENABLED_KEY, true);
 
   registerMenus();
 
@@ -88,6 +93,7 @@
   }
 
   setupXiaohongshuLoginGate();
+  setupBilibiliUpBlocker();
 
   const baseHideSelectors = [
     '.ad',
@@ -3847,6 +3853,545 @@
     }
   }
 
+  function setupBilibiliUpBlocker() {
+    if (!isBilibiliHost || !bilibiliUpBlockEnabled || bilibiliUpBlockerInstalled) return;
+
+    bilibiliUpBlockerInstalled = true;
+
+    const buttonClass = 'pp-bili-up-block';
+    const inlineButtonClass = 'is-inline';
+    const loadingButtonClass = 'is-loading';
+    const toastClass = 'pp-bili-up-block-toast';
+    const hideDelay = 220;
+    const requestTimeout = 12000;
+    const upSelector = [
+      'a[href*="space.bilibili.com"]',
+      '.bili-video-card__info--owner',
+      '.bili-video-card__info--author',
+      '.up-name',
+      '.user-name',
+      '.up-info',
+      '.video-card-row .up',
+      '.feed-card .up',
+      '.bili-dyn-card-video__author',
+      '.bili-dyn-title__text',
+      '.bili-rich-text-link',
+    ].join(',');
+    const positionSelector = [
+      '.bili-video-card__info--owner',
+      '.bili-video-card__info--author',
+      '.up-name',
+      '.user-name',
+      '.up-info',
+      '.video-card-row .up',
+      '.feed-card .up',
+      '.bili-dyn-card-video__author',
+      '.bili-dyn-title__text',
+    ].join(',');
+    const cardSelector = '.bili-video-card, .video-item, .search-card, .result-item, .video-list-item';
+
+    const state = {
+      button: null,
+      hideTimer: 0,
+      activeTarget: null,
+      activePositionTarget: null,
+      activeInlineHost: null,
+      activeMid: '',
+      activeName: '',
+      blockingMid: '',
+      positionFrame: 0,
+    };
+
+    addStyle(`
+      .${buttonClass} {
+        position: fixed;
+        z-index: 999999;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 104px;
+        padding: 8px 14px;
+        border: 0;
+        border-radius: 8px;
+        background: #fb7299;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+        transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+        user-select: none;
+        white-space: nowrap;
+      }
+
+      .${buttonClass}:hover {
+        background: #f53a71;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26);
+      }
+
+      .${buttonClass}:active {
+        transform: translateY(0);
+      }
+
+      .${buttonClass}.${inlineButtonClass} {
+        position: static;
+        z-index: auto;
+        min-width: auto;
+        margin-left: 8px;
+        padding: 5px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.2;
+        box-shadow: none;
+        vertical-align: middle;
+        flex: 0 0 auto;
+      }
+
+      .${buttonClass}.${inlineButtonClass}:hover {
+        transform: none;
+        box-shadow: none;
+      }
+
+      .${buttonClass}.${loadingButtonClass} {
+        cursor: wait;
+        opacity: 0.82;
+        pointer-events: none;
+      }
+
+      .${toastClass} {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1000000;
+        max-width: min(360px, calc(100vw - 32px));
+        padding: 12px 16px;
+        border-radius: 8px;
+        color: #fff;
+        font-size: 14px;
+        line-height: 1.45;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+        animation: pp-bili-up-block-toast-in 0.22s ease;
+        word-break: break-word;
+      }
+
+      .${toastClass}[data-type="success"] {
+        background: #00ae66;
+      }
+
+      .${toastClass}[data-type="error"] {
+        background: #f56c6c;
+      }
+
+      .${toastClass}[data-type="info"] {
+        background: #409eff;
+      }
+
+      @keyframes pp-bili-up-block-toast-in {
+        from {
+          opacity: 0;
+          transform: translate3d(12px, 0, 0);
+        }
+
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+        }
+      }
+    `);
+
+    document.addEventListener('mouseover', handleMouseOver, true);
+    document.addEventListener('mouseout', handleMouseOut, true);
+
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = toastClass;
+      toast.dataset.type = type;
+      toast.textContent = message;
+
+      const append = () => {
+        const host = document.body || document.documentElement;
+        if (!host) return;
+
+        host.appendChild(toast);
+        window.setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translate3d(12px, 0, 0)';
+          toast.style.transition = 'all 0.25s ease';
+          window.setTimeout(() => toast.remove(), 250);
+        }, 2200);
+      };
+
+      if (document.body || document.documentElement) append();
+      else document.addEventListener('DOMContentLoaded', append, { once: true });
+    }
+
+    function clearHideTimer() {
+      if (!state.hideTimer) return;
+
+      window.clearTimeout(state.hideTimer);
+      state.hideTimer = 0;
+    }
+
+    function scheduleHide() {
+      clearHideTimer();
+      state.hideTimer = window.setTimeout(hideButton, hideDelay);
+    }
+
+    function hideButton() {
+      clearHideTimer();
+      if (state.button) {
+        state.button.remove();
+        state.button = null;
+      }
+
+      state.activeTarget = null;
+      state.activePositionTarget = null;
+      state.activeInlineHost = null;
+      state.activeMid = '';
+      state.activeName = '';
+    }
+
+    function ensureButton() {
+      if (state.button && state.button.isConnected) return state.button;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = buttonClass;
+      button.textContent = '拉黑该UP';
+
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (!state.activeMid || !state.activeName) {
+          showToast('未能识别当前UP主信息，请重试', 'error');
+          return;
+        }
+
+        blockBilibiliUp(state.activeMid, state.activeName);
+      }, true);
+
+      button.addEventListener('mouseenter', clearHideTimer, true);
+      button.addEventListener('mouseleave', (event) => {
+        if (isInsideActiveRegion(event.relatedTarget)) return;
+        scheduleHide();
+      }, true);
+
+      (document.body || document.documentElement).appendChild(button);
+      state.button = button;
+      return button;
+    }
+
+    function setButtonLoading(isLoading) {
+      if (!state.button) return;
+
+      state.button.classList.toggle(loadingButtonClass, isLoading);
+      state.button.textContent = isLoading ? '拉黑中...' : '拉黑该UP';
+    }
+
+    function extractMidFromUrl(href) {
+      if (!href) return '';
+
+      const match = href.match(/space\.bilibili\.com\/(\d+)/i);
+      return match ? match[1] : '';
+    }
+
+    function cleanUpName(rawName) {
+      if (!rawName) return '';
+
+      return rawName
+        .replace(/\s*·\s*(\d+秒前|\d+分钟前|\d+小时前|\d+天前|\d+周前|\d+月前|\d+年前).*$/u, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function findUpLink(element) {
+      if (!(element instanceof Element)) return null;
+
+      if (element.matches('a[href*="space.bilibili.com"]')) return element;
+
+      const closestLink = element.closest('a[href*="space.bilibili.com"]');
+      if (closestLink) return closestLink;
+
+      const nestedLink = element.querySelector('a[href*="space.bilibili.com"]');
+      if (nestedLink) return nestedLink;
+
+      if (isBilibiliSearchPage()) {
+        const card = findBilibiliSearchCard(element);
+        const cardLink = card && card.querySelector('a[href*="space.bilibili.com"]');
+        if (cardLink) return cardLink;
+      }
+
+      return null;
+    }
+
+    function findPositionTarget(element, link) {
+      if (element instanceof Element) {
+        const hit = element.closest(positionSelector);
+        if (hit && hit.contains(link)) return hit;
+      }
+
+      if (link instanceof Element) {
+        const owner = link.closest(positionSelector);
+        if (owner && owner.contains(link)) return owner;
+      }
+
+      return link;
+    }
+
+    function buildContextFromElement(element) {
+      if (!(element instanceof Element)) return null;
+
+      const hit = element.closest(upSelector);
+      const link = findUpLink(hit || element);
+      if (!link) return null;
+
+      const mid = extractMidFromUrl(link.href);
+      if (!mid) return null;
+
+      const positionTarget = findPositionTarget(hit || element, link);
+      if (!hit && !isBilibiliSearchPage()) return null;
+      if (!hit && positionTarget !== link && !positionTarget.contains(element)) return null;
+
+      const fallbackText = hit ? hit.textContent : '';
+      const rawName = link.getAttribute('title') || link.textContent || fallbackText || '';
+      const name = cleanUpName(rawName);
+      if (!name) return null;
+
+      return {
+        mid,
+        name,
+        target: link,
+        positionTarget,
+      };
+    }
+
+    function isBilibiliSearchPage() {
+      return location.hostname === 'search.bilibili.com';
+    }
+
+    function findBilibiliSearchCard(element) {
+      if (!(element instanceof Element)) return null;
+
+      return element.closest(cardSelector);
+    }
+
+    function findSearchInlineHost(context) {
+      if (!isBilibiliSearchPage() || !context || !(context.target instanceof Element) || !context.target.isConnected) {
+        return null;
+      }
+
+      const link = context.target;
+      const positionTarget = context.positionTarget instanceof Element && context.positionTarget.isConnected
+        ? context.positionTarget
+        : link;
+      const linkParent = link.parentElement instanceof Element ? link.parentElement : null;
+      const isInsideLink = positionTarget === link
+        || positionTarget.matches('a[href*="space.bilibili.com"]')
+        || positionTarget.closest('a[href*="space.bilibili.com"]') === link;
+
+      if (isInsideLink) return linkParent;
+      return positionTarget.contains(link) ? positionTarget : linkParent;
+    }
+
+    function useInlineButton(host) {
+      if (!(host instanceof Element) || !host.isConnected) return null;
+
+      const button = ensureButton();
+      button.classList.add(inlineButtonClass);
+      button.style.left = '';
+      button.style.top = '';
+
+      if (button.parentElement !== host) host.appendChild(button);
+
+      state.activeInlineHost = host;
+      return button;
+    }
+
+    function useFloatingButton() {
+      const button = ensureButton();
+      button.classList.remove(inlineButtonClass);
+      state.activeInlineHost = null;
+
+      if (button.parentElement !== document.body && document.body) {
+        document.body.appendChild(button);
+      }
+
+      return button;
+    }
+
+    function updateButtonPosition() {
+      if (!state.button || !state.activeTarget || !state.activeTarget.isConnected) {
+        hideButton();
+        return;
+      }
+
+      if (state.button.classList.contains(inlineButtonClass)) return;
+
+      const positionTarget = state.activePositionTarget && state.activePositionTarget.isConnected
+        ? state.activePositionTarget
+        : state.activeTarget;
+      const rect = positionTarget.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        hideButton();
+        return;
+      }
+
+      const button = useFloatingButton();
+      const top = rect.bottom + 8;
+      const left = Math.min(
+        rect.left,
+        Math.max(8, document.documentElement.clientWidth - button.offsetWidth - 8)
+      );
+
+      button.style.left = `${Math.max(8, left)}px`;
+      button.style.top = `${top}px`;
+    }
+
+    function requestPositionUpdate() {
+      if (state.positionFrame) return;
+
+      state.positionFrame = window.requestAnimationFrame(() => {
+        state.positionFrame = 0;
+        updateButtonPosition();
+      });
+    }
+
+    function showBlockButton(context) {
+      clearHideTimer();
+
+      const sameTarget = state.activeTarget === context.target && state.activeMid === context.mid;
+      const inlineHost = findSearchInlineHost(context);
+      state.activeTarget = context.target;
+      state.activePositionTarget = inlineHost || context.positionTarget || context.target;
+      state.activeMid = context.mid;
+      state.activeName = context.name;
+
+      if (inlineHost && useInlineButton(inlineHost)) {
+        if (!sameTarget) setButtonLoading(false);
+        return;
+      }
+
+      useFloatingButton();
+      if (!sameTarget) setButtonLoading(false);
+      requestPositionUpdate();
+    }
+
+    function isInsideActiveRegion(node) {
+      if (!(node instanceof Element)) return false;
+
+      const inTarget = !!(state.activeTarget && state.activeTarget.contains(node));
+      const inPositionTarget = !!(state.activePositionTarget && state.activePositionTarget.contains(node));
+      const inInlineHost = !!(state.activeInlineHost && state.activeInlineHost.contains(node));
+      const inButton = !!(state.button && state.button.contains(node));
+      return inTarget || inPositionTarget || inInlineHost || inButton;
+    }
+
+    function blockBilibiliUp(mid, name) {
+      const csrf = document.cookie.match(/(?:^|;\s*)bili_jct=([^;]+)/)?.[1];
+      if (!csrf) {
+        showToast('请先登录B站，再执行拉黑操作', 'error');
+        return;
+      }
+
+      if (state.blockingMid === mid) {
+        showToast('正在执行拉黑，请稍候', 'info');
+        return;
+      }
+
+      if (typeof GM_xmlhttpRequest !== 'function') {
+        showToast('当前脚本管理器不支持跨域请求，无法调用B站拉黑接口', 'error');
+        return;
+      }
+
+      state.blockingMid = mid;
+      setButtonLoading(true);
+
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: 'https://api.bilibili.com/x/relation/modify',
+        timeout: requestTimeout,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          Referer: window.location.href,
+        },
+        data: new URLSearchParams({
+          fid: mid,
+          act: '5',
+          csrf,
+        }).toString(),
+        onload: (response) => {
+          let payload = null;
+
+          try {
+            payload = JSON.parse(response.responseText || '{}');
+          } catch (error) {
+            console.error('B站拉黑接口返回无法解析:', error, response.responseText);
+          }
+
+          if (response.status >= 200 && response.status < 300 && payload && payload.code === 0) {
+            showToast(`已成功拉黑 UP：${name}`, 'success');
+            hideButton();
+          } else {
+            const message = payload && payload.message ? payload.message : `请求失败（HTTP ${response.status || '未知'}）`;
+            showToast(`拉黑失败：${message}`, 'error');
+            setButtonLoading(false);
+          }
+
+          state.blockingMid = '';
+        },
+        onerror: () => {
+          state.blockingMid = '';
+          setButtonLoading(false);
+          showToast('网络错误，拉黑失败', 'error');
+        },
+        ontimeout: () => {
+          state.blockingMid = '';
+          setButtonLoading(false);
+          showToast('请求超时，拉黑失败', 'error');
+        },
+        onabort: () => {
+          state.blockingMid = '';
+          setButtonLoading(false);
+          showToast('请求被中断，拉黑失败', 'error');
+        },
+      });
+    }
+
+    function handleMouseOver(event) {
+      if (state.button && event.target instanceof Element && state.button.contains(event.target)) {
+        clearHideTimer();
+        return;
+      }
+
+      const context = buildContextFromElement(event.target);
+      if (!context) return;
+
+      if (context.target === state.activeTarget && context.mid === state.activeMid) {
+        clearHideTimer();
+        return;
+      }
+
+      showBlockButton(context);
+    }
+
+    function handleMouseOut(event) {
+      if (!state.button && !state.activeTarget) return;
+
+      const leavingActiveTarget = !!(state.activeTarget && event.target instanceof Element && state.activeTarget.contains(event.target));
+      const leavingPositionTarget = !!(state.activePositionTarget && event.target instanceof Element && state.activePositionTarget.contains(event.target));
+      const leavingButton = !!(state.button && event.target instanceof Element && state.button.contains(event.target));
+      if (!leavingActiveTarget && !leavingPositionTarget && !leavingButton) return;
+      if (isInsideActiveRegion(event.relatedTarget)) return;
+
+      scheduleHide();
+    }
+
+    console.log('PagePurifier B站UP快捷拉黑已加载');
+  }
+
   function cleanupBilibiliFamily(root) {
     if (!isBilibiliHost) return;
 
@@ -4093,6 +4638,14 @@
       storage.set(DISABLED_HOSTS_KEY, next);
       location.reload();
     });
+
+    if (isBilibiliHost) {
+      const upBlockLabel = bilibiliUpBlockEnabled ? '关闭B站UP快捷拉黑' : '开启B站UP快捷拉黑';
+      GM_registerMenuCommand(upBlockLabel, () => {
+        storage.set(BILIBILI_UP_BLOCK_ENABLED_KEY, !storage.get(BILIBILI_UP_BLOCK_ENABLED_KEY, true));
+        location.reload();
+      });
+    }
 
     if (globallyEnabled && !disabledOnHost) {
       GM_registerMenuCommand('立即重新清理广告', () => cleanup(document));
